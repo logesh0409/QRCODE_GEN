@@ -1,13 +1,15 @@
 # My Certificates + QR code
 
-Upload your certificate (PNG/JPG/PDF) in /admin. You get a QR code. Scanning the QR opens
+Upload your certificate (PNG/JPG/WEBP/PDF) in /admin. You get a QR code. Scanning the QR opens
 a page that shows your stored certificate.
 
-## Run
-    npm install
-    ADMIN_PASSWORD=yourpassword npm start
-Open http://localhost:3000/admin  (user: admin)
+Runs on Netlify: certificate records live in Netlify Database, uploaded files in Netlify Blobs.
 
-## Deploy (needed for QR to work on other phones)
-Deploy to Render / Railway / VPS and set BASE_URL=https://your-site.com, then upload
-and generate QR codes AFTER deploying. Uploaded files must be on a persistent disk.
+## Setup
+In Netlify project settings, add an environment variable `ADMIN_PASSWORD` (optionally `ADMIN_USER`,
+default `admin`, and `BASE_URL` if you use a custom domain), then redeploy.
+Open https://<your-site>/admin and log in.
+
+## Run locally
+    npm install
+    ADMIN_PASSWORD=yourpassword npx netlify dev
