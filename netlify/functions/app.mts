@@ -2,9 +2,9 @@ import type { Config } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 import { desc, eq } from "drizzle-orm";
 import QRCode from "qrcode";
-import { randomBytes } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { db } from "../../db/index.js";
-import { certificates } from "../../db/schema.js";
+import { admins, certificates } from "../../db/schema.js";
 
 const ALLOWED: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".pdf": "application/pdf",
@@ -21,20 +21,42 @@ const page = (title: string, body: string, status = 200) => new Response(`<!doct
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
 <link rel="stylesheet" href="/style.css"></head><body>${body}</body></html>`, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 
-function authorized(req: Request) {
+const hashPassword = (password: string) => {
+  const salt = randomBytes(16).toString("hex");
+  return `${salt}:${scryptSync(password, salt, 64).toString("hex")}`;
+};
+const checkPassword = (password: string, stored: string) => {
+  const [salt, hash] = stored.split(":");
+  return timingSafeEqual(scryptSync(password, salt, 64), Buffer.from(hash, "hex"));
+};
+const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+// The admin login comes from ADMIN_PASSWORD (if set) or the account created on the first-time setup page
+async function getAdmin() {
   const password = Netlify.env.get("ADMIN_PASSWORD");
-  const user = Netlify.env.get("ADMIN_USER") || "admin";
-  if (!password) return false;
+  if (password) return { username: Netlify.env.get("ADMIN_USER") || "admin", check: (p: string) => safeEqual(p, password) };
+  const [a] = await db.select().from(admins);
+  return a && { username: a.username, check: (p: string) => checkPassword(p, a.passwordHash) };
+}
+
+function authorized(req: Request, admin: NonNullable<Awaited<ReturnType<typeof getAdmin>>>) {
   const h = req.headers.get("authorization") || "";
   const decoded = Buffer.from(h.split(" ")[1] || "", "base64").toString();
   const i = decoded.indexOf(":");
-  return i > -1 && decoded.slice(0, i) === user && decoded.slice(i + 1) === password;
+  return i > -1 && decoded.slice(0, i) === admin.username && admin.check(decoded.slice(i + 1));
 }
 
-const loginRequired = () => Netlify.env.get("ADMIN_PASSWORD")
-  ? new Response("Login required", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Admin"' } })
-  : page("Setup needed", `<main class="wrap"><div class="bad"><h1>Admin password not set</h1>
-    <p>Add an <code>ADMIN_PASSWORD</code> environment variable in your Netlify project settings, then redeploy.</p></div></main>`, 503);
+const loginRequired = () => new Response("Login required", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Admin"' } });
+
+const setupPage = (error = "") => page("Create admin", `<main class="wrap"><h1>Create admin account</h1>
+    <p>No admin exists yet. Choose the username and password you'll use to log in to <code>/admin</code>. This page disappears once the account is created.</p>
+    ${error ? `<div class="bad"><p>${esc(error)}</p></div>` : ""}
+    <form method="post" action="/admin/setup" class="form">
+      <input name="username" placeholder="Username" value="admin" required autocomplete="username">
+      <input type="password" name="password" placeholder="Password (min 8 characters)" minlength="8" required autocomplete="new-password">
+      <input type="password" name="confirm" placeholder="Repeat password" minlength="8" required autocomplete="new-password">
+      <button>Create admin</button>
+    </form></main>`, error ? 400 : 200);
 
 const redirect = (to: string) => new Response(null, { status: 303, headers: { location: to } });
 
@@ -68,7 +90,22 @@ export default async (req: Request) => {
   }
 
   // ---- Admin: upload certificate + get QR ----
-  if (!authorized(req)) return loginRequired();
+  const admin = await getAdmin();
+  if (!admin) {
+    if (p === "/admin/setup" && req.method === "POST") {
+      const form = await req.formData();
+      const username = String(form.get("username") || "").trim();
+      const password = String(form.get("password") || "");
+      if (!username || username.includes(":")) return setupPage("Enter a username (it can't contain \":\").");
+      if (password.length < 8) return setupPage("The password must be at least 8 characters.");
+      if (password !== form.get("confirm")) return setupPage("The passwords don't match.");
+      // id is always 1, so if someone else created the admin first this inserts nothing
+      await db.insert(admins).values({ username, passwordHash: hashPassword(password) }).onConflictDoNothing();
+      return redirect("/admin");
+    }
+    return setupPage();
+  }
+  if (!authorized(req, admin)) return loginRequired();
 
   if (p === "/admin" || p === "/admin/") {
     const rows = (await db.select().from(certificates).orderBy(desc(certificates.createdAt))).map((c) => `<tr><td>${esc(c.title)}</td><td><a href="/c/${c.id}" target="_blank">View</a></td>
