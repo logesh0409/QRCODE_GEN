@@ -6,9 +6,12 @@ a page that shows your stored certificate.
 Runs on Netlify: certificate records live in Netlify Database, uploaded files in Netlify Blobs.
 
 ## Setup
-In Netlify project settings, add an environment variable `ADMIN_PASSWORD` (optionally `ADMIN_USER`,
-default `admin`, and `BASE_URL` if you use a custom domain), then redeploy.
-Open https://<your-site>/admin and log in.
+Open https://<your-site>/admin. The first time, it shows a "Create admin account" page: choose a
+username and password. The account is stored in the database (password hashed) and the page then
+disappears; from then on /admin asks you to log in with those details.
+
+Alternatively, set `ADMIN_PASSWORD` (and optionally `ADMIN_USER`, default `admin`) as environment
+variables in Netlify; they take priority over the stored account. Set `BASE_URL` if you use a custom domain.
 
 ## Run locally
     npm install
