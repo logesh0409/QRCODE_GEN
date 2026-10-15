@@ -1,0 +1,14 @@
+{
+  "name": "cert-verify",
+  "version": "1.0.0",
+  "description": "Certificate verification website with QR codes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.4.0",
+    "qrcode": "^1.5.4"
+  }
+}
